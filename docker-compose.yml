@@ -1,0 +1,12 @@
+version: '3'
+services:
+  rabbitmq:
+    build:
+      context: "."
+      dockerfile: "./docker/rabbitmq/Dockerfile"
+    environment:
+      RABBITMQ_SERVER_ADDITIONAL_ERL_ARGS: "-rabbit log_levels [{connection,warning},{channel,warning}]"
+      RMQ_USER: ${RMQ_USER}
+      RMQ_PASS: ${RMQ_PASS}
+    ports:
+      - "15672:15672"

@@ -4,49 +4,13 @@ import os
 import time
 from datetime import datetime
 import schedule
-from zeep import Client
+from zeep import Client, Settings
 from zeep import xsd
 from zeep.plugins import HistoryPlugin
 from persistent_outbound_mq import OutboundMqConnection
-from auth.authlog import AuthLog
 
-TMP_CONFIG = [
 
-    {
-        'docker_id': 8,
-        'loc_name': 'Manchester Victoria',
-        'new_lnk': 'MNCRVIC'
-    },
-    {
-        'docker_id': 7,
-        'loc_name': 'Manchester Oxford Road',
-        'new_lnk': 'MNCROXR'
-    },
-    {
-        'docker_id': 14,
-        'loc_name': 'Derby Station',
-        'new_lnk': 'DRBY'
-    },
-    {
-        'docker_id': 40,
-        'loc_name': 'Dalston Junction',
-        'new_lnk': 'DALS'
-    },
-    {
-        'docker_id': 41,
-        'loc_name': 'Highbury and Islington',
-        'new_lnk': 'HIGHBYE'
-    },
-    {
-        'docker_id': 31,
-        'loc_name': 'Marylebone Station',
-        'new_lnk': 'MARYLBN'
-    }
-]
-
-LG = AuthLog(__file__)
-VERSION = "1.0.0"
-
+TIPLOCS = os.getenv('TIPLOCS', ())
 LDB_TOKEN = os.getenv('SLDB_TOKEN')
 WSDL = os.getenv('SLDB_WSDL')
 CHECK_FREQ = int(os.getenv('SLDB_FREQ'))
@@ -54,22 +18,18 @@ RMQ_EXCHANGE = os.getenv('SLDB_RMQ_EXCHANGE')
 
 if None in (LDB_TOKEN, WSDL, CHECK_FREQ, RMQ_EXCHANGE):
     MSG = "Missing environment variables"
-    LG.error(MSG)
     raise Exception(MSG)
-
 
 class SoapConnection(OutboundMqConnection):
     """Fetch the LDB Data"""
 
     instances = []
 
-    def __init__(self, **kwargs):
+    def __init__(self, tiploc: str):
         """Initialisation"""
 
-        self.docker_id = kwargs['docker_id']
-        self.loc_name = kwargs['loc_name']
-        self.new_lnk = kwargs['new_lnk']
-        super().__init__(LG, RMQ_EXCHANGE)
+        self.new_lnk = tiploc
+        super().__init__(RMQ_EXCHANGE)
 
         self.instances.append(self)
 
@@ -81,7 +41,7 @@ class SoapConnection(OutboundMqConnection):
         )
 
         history = HistoryPlugin()
-        client = Client(wsdl=WSDL, plugins=[history])
+        client = Client(wsdl=WSDL, plugins=[history], settings=Settings(strict=False))
         header = xsd.Element(
             '{http://thalesgroup.com/RTTI/2013-11-28/Token/types}AccessToken',
             xsd.ComplexType([
@@ -171,12 +131,14 @@ class SoapConnection(OutboundMqConnection):
                 'cis_comments': ""
             }
 
+            print(svc_data)
+
             post_list.append(svc_data)
+
 
         self.send_msg(
             {'results': post_list},
             headers={
-                'id': self.docker_id,
                 'tiploc': self.new_lnk
             }
         )
@@ -193,15 +155,11 @@ class SoapConnection(OutboundMqConnection):
 
 if __name__ == "__main__":
 
-    LG.error(f'{__file__} Running...')
-
-    for entry in TMP_CONFIG:
-        SoapConnection(**entry)
+    for entry in TIPLOCS.split(','):
+        SoapConnection(entry)
 
     schedule.every(CHECK_FREQ).seconds.do(SoapConnection.get_update)
 
     while True:
         schedule.run_pending()
         time.sleep(1)
-
-    LG.error(f'{__file__} Finished')

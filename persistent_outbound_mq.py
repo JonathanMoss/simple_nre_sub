@@ -4,9 +4,10 @@
 import json
 import os
 import sys
-import time
 import logging
+import time
 import pika
+
 
 HEARTBEAT = 30
 TIMEOUT = 300
@@ -23,7 +24,7 @@ class OutboundMqConnection:
     def __init__(self, exchange: str, logger_obj=None):
         """Initialisation"""
 
-        self.LG = self.setup_logger(logger_obj)
+        self.logger = self.setup_logger(logger_obj)
         self._exchange = exchange
 
         self._broker_host, self._broker_port = self.get_broker_details()
@@ -31,7 +32,8 @@ class OutboundMqConnection:
         self._channel = None
         self._connection = None
 
-    def setup_logger(self, logger_obj) -> object:
+    @staticmethod
+    def setup_logger(logger_obj) -> object:
         """Returns a logger based on the one passed at init, or a default"""
 
         if not logger_obj:
@@ -45,7 +47,8 @@ class OutboundMqConnection:
         return logger_obj
 
 
-    def get_properties(self, headers=None) -> pika.BasicProperties:
+    @staticmethod
+    def get_properties(headers=None) -> pika.BasicProperties:
         """Returns an object representing send message properties"""
 
         if isinstance(headers, dict):
@@ -70,7 +73,8 @@ class OutboundMqConnection:
             blocked_connection_timeout=TIMEOUT
         )
 
-    def get_broker_details(self) -> tuple:
+    @staticmethod
+    def get_broker_details() -> tuple:
         """Returns the broker host/port from env variables"""
 
         broker_host = os.environ.get('BROKER_HOST', None)
@@ -81,7 +85,8 @@ class OutboundMqConnection:
 
         return broker_host, broker_port
 
-    def get_credentials(self) -> pika.PlainCredentials:
+    @staticmethod
+    def get_credentials() -> pika.PlainCredentials:
         """Returns the credentials for use with a broker connection"""
 
         rmq_user = os.environ.get('RMQ_USER', None)
@@ -94,6 +99,24 @@ class OutboundMqConnection:
             username=rmq_user,
             password=rmq_pass
         )
+
+    def manage_connection(self, attempt=0) -> bool:
+        """Manages connection attempts"""
+
+        attempt += 1
+        while attempt < MAX_RETRY:
+            if self.create_connection():
+                return True
+
+            self.logger.error('Could not create a connection to RMQ')
+            self.logger.error('\tRe-try in %s seconds', attempt + attempt)
+            self.logger.error('\tAttempt %s', attempt)
+            time.sleep(attempt + attempt)
+            self.manage_connection(attempt)
+
+        self.logger.error('Maximum connection attempts breached, giving up...')
+        sys.exit(1)
+
 
     def create_connection(self) -> bool:
         """Creates a connection to RMQ"""
@@ -110,9 +133,7 @@ class OutboundMqConnection:
                 durable=True
             )
             return True
-        except Exception as err:
-            self.LG.error('Could not create a connection to RMQ')
-            self.LG.error(f'{err}')
+        except pika.exceptions.AMQPConnectionError:
             return False
 
     def close_connection(self) -> None:
@@ -121,10 +142,9 @@ class OutboundMqConnection:
         try:
             self._channel.close()
             self._connection.close()
-            self.LG.info('Channel and Connection closed')
-        except Exception as err:
-            self.LG.info('Cannot gracefully close the connection')
-            self.LG.info(f'{err}')
+            self.logger.info('Channel and Connection closed')
+        except AttributeError:
+            self.logger.info('Cannot gracefully close the connection')
         finally:
             self._channel = None
             self._connection = None
@@ -142,16 +162,15 @@ class OutboundMqConnection:
 
             return True
 
-        except Exception as err:
-            self.LG.error('Could not send message to RabbitMQ')
-            self.LG.error(f'{err}')
+        except pika.exceptions.AMQPConnectionError:
+            self.logger.error('Could not send message to RabbitMQ')
             return False
 
     def send_msg(self, msg: dict, headers=None, raw=False, attempt=1) -> bool:
         """ This function publishes the msg to the broker """
 
         if not self._channel or not self._channel.is_open:
-            self.create_connection()
+            self.manage_connection()
 
         if not raw:
             msg = json.dumps(msg)
@@ -159,20 +178,20 @@ class OutboundMqConnection:
         if not self.publish_message(msg, headers):
 
             self.close_connection()
-            self.LG.error(
+            self.logger.error(
                 'Unable to publish message to RMQ'
             )
 
             if attempt > MAX_RETRY:
-                self.LG.error(
+                self.logger.error(
                     'Maximum sending attempts breached, giving up...'
                 )
 
                 return False
 
             self.send_msg(msg, headers=headers, raw=True, attempt=(attempt + 1))
-
-        return True
+        else:
+            return True
 
 if __name__ == '__main__':
 

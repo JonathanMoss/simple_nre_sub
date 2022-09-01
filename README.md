@@ -4,4 +4,8 @@ A simple implementation of a connection to NRE Live Departure Boards
 ## Environment Variables Needed
 ```bash
 RMQ_USER
-RMQ_PASS```
+RMQ_PASS
+BROKER_HOST
+BROKER_PORT
+TIPLOCS
+```

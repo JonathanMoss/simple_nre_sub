@@ -1,3 +1,4 @@
+#!/usr/bin/env python3
 """Create and maintains a connection to NRE SLDB"""
 
 import os
@@ -7,10 +8,11 @@ import schedule
 from zeep import Client, Settings
 from zeep import xsd
 from zeep.plugins import HistoryPlugin
+import jsonpickle
 from persistent_outbound_mq import OutboundMqConnection
 
 
-TIPLOCS = os.getenv('TIPLOCS', ())
+CRS = os.getenv('CRS', 'CRE,PAD')
 LDB_TOKEN = os.getenv('SLDB_TOKEN')
 WSDL = os.getenv('SLDB_WSDL')
 CHECK_FREQ = int(os.getenv('SLDB_FREQ'))
@@ -25,10 +27,10 @@ class SoapConnection(OutboundMqConnection):
 
     instances = []
 
-    def __init__(self, tiploc: str):
+    def __init__(self, crs: str):
         """Initialisation"""
 
-        self.new_lnk = tiploc
+        self.crs = crs
         super().__init__(RMQ_EXCHANGE)
 
         self.instances.append(self)
@@ -52,94 +54,21 @@ class SoapConnection(OutboundMqConnection):
         )
         header_value = header(TokenValue=LDB_TOKEN)
 
-        return client.service.GetArrivalDepartureBoardByTIPLOC(
+        return client.service.GetArrDepBoardWithDetails(
             time=time_now,
             timeWindow=120,
-            numRows=100,
-            tiploc=self.new_lnk,
+            numRows=2,
+            crs=self.crs,
             _soapheaders=[header_value]
         )
-
-    @staticmethod
-    def format_time(val) -> str:
-        """Takes a value, returns a string"""
-
-        if isinstance(val, datetime):
-            return str(val.time())
-
-        return ""
 
     def post_to_broker(self, data: dict):  # pylint: disable=R0914
         """Post to the RMQ Broker"""
 
-        post_list = []
-
-        for svc in data.trainServices.service:
-
-            # Extrapolate the TOC details
-            toc_short = svc['operatorCode']
-            toc_long = svc['operator']
-            toc = f'<span style="cursor: pointer" title="{toc_long}">'
-            toc += f'{toc_short}</span>'
-
-            # Extrapolate origin
-            org_tpl = svc['origin']['location'][0]['tiploc']
-            org_desc = svc['origin']['location'][0]['locationName']
-            origin = f'<span style="cursor: pointer;" title="{org_desc}">'
-            origin += f'{org_tpl}</span>'
-
-            # Extrapolate destination
-            dest_tpl = svc['destination']['location'][0]['tiploc']
-            dest_desc = svc['destination']['location'][0]['locationName']
-            destination = f'<span style="cursor: pointer;" title="{dest_desc}">'
-            destination += f'{dest_tpl}</span>'
-
-            # Extrapolate Platform
-            hidden = svc['platformIsHidden']
-            platform = svc['platform']
-            if not platform or hidden:
-                platform = "TBC"
-
-            # Arrival Times
-            sta = self.format_time(svc['sta'])
-            eta = self.format_time(svc['eta'])
-
-            # Departure Times
-            std = self.format_time(svc['std'])
-            etd = self.format_time(svc['etd'])
-
-            # Consist
-            consist = ""
-            length = svc['length']
-            if length:
-                consist = f"Service consists of {length} vehicles"
-
-            svc_data = {
-                'headcode': svc['trainid'],
-                'uid': svc['uid'],
-                'toc': toc,
-                'consist': consist,
-                'origin': origin,
-                'destination': destination,
-                'platform': platform,
-                'wta': sta,
-                'wtd': std,
-                'eta': eta,
-                'etd': etd,
-                'last_reported': "",
-                'distruption': "",
-                'cis_comments': ""
-            }
-
-            print(svc_data)
-
-            post_list.append(svc_data)
-
-
         self.send_msg(
-            {'results': post_list},
+            {'results': jsonpickle.encode(data, unpicklable=False)},
             headers={
-                'tiploc': self.new_lnk
+                'crs': self.crs
             }
         )
 
@@ -155,7 +84,7 @@ class SoapConnection(OutboundMqConnection):
 
 if __name__ == "__main__":
 
-    for entry in TIPLOCS.split(','):
+    for entry in CRS.split(','):
         SoapConnection(entry)
 
     schedule.every(CHECK_FREQ).seconds.do(SoapConnection.get_update)

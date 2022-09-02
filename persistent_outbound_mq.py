@@ -1,13 +1,14 @@
 #!/usr/bin/env python3
 """Module for a persistent RabbitMQ outbound connection"""
 
+# pylint: disable=R1710
+
 import json
 import os
 import sys
 import logging
 import time
 import pika
-
 
 HEARTBEAT = 30
 TIMEOUT = 300
@@ -192,11 +193,3 @@ class OutboundMqConnection:
             self.send_msg(msg, headers=headers, raw=True, attempt=(attempt + 1))
         else:
             return True
-
-if __name__ == '__main__':
-
-    conn = OutboundMqConnection('test')
-    print(conn.send_msg({'test': 'test1'}))
-    while True:
-        time.sleep(2)
-        print(conn.send_msg({'test': 'test1'}))

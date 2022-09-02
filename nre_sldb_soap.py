@@ -57,7 +57,7 @@ class SoapConnection(OutboundMqConnection):
         return client.service.GetArrDepBoardWithDetails(
             time=time_now,
             timeWindow=120,
-            numRows=2,
+            numRows=100,
             crs=self.crs,
             _soapheaders=[header_value]
         )

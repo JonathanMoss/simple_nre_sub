@@ -1,6 +1,7 @@
 version: '3'
 services:
   rabbitmq:
+    restart: always
     build:
       context: "."
       dockerfile: "./docker/rabbitmq/Dockerfile"
@@ -12,3 +13,24 @@ services:
       - "15672:15672"
       - "5672:5672"
       - "5671:5671"
+
+  # base-python:
+  #   build:
+  #     context: "."
+  #     dockerfile: "./docker/base-python/Dockerfile"
+
+  nre-sldb-soap:
+    depends_on:
+      - rabbitmq
+    image: "base-python:latest"
+    entrypoint: "./entrypoint.sh"
+    restart: always
+    environment:
+      RMQ_USER: ${RMQ_USER}
+      RMQ_PASS: ${RMQ_PASS}
+      BROKER_HOST: rabbitmq
+      BROKER_PORT: 5672
+      SLDB_WSDL: ${SLDB_WSDL}
+      SLDB_FREQ: ${SLDB_FREQ}
+      SLDB_TOKEN: ${SLDB_TOKEN}
+      SLDB_RMQ_EXCHANGE: ${SLDB_RMQ_EXCHANGE}
